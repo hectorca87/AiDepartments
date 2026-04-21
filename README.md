@@ -1,183 +1,184 @@
+🌐 **English** | [Español](README_ES.md)
+
 # AiDepartments
 
-**Tu equipo de desarrollo autónomo con IA.**
+**Your autonomous AI development team.**
 
-Le dices qué quieres. Gemini planifica. Claude lo implementa. Tú revisas el resultado.
-
----
-
-## ¿Qué es?
-
-AiDepartments es un sistema que simula un equipo de desarrollo con dos roles de IA:
-
-- **PM (Project Manager)** — Gemini 2.5 Pro. Analiza tu proyecto, descompone el objetivo en tareas, y revisa el trabajo.
-- **Developer** — Claude Opus (Antigravity IDE). Escribe código, crea archivos, ejecuta tests.
-
-Tú le das un objetivo en lenguaje natural. El sistema se encarga del resto.
-
-```
-"Crear una API en FastAPI con un endpoint /health y su test unitario"
-```
-
-El PM crea un plan (3 tareas), las asigna una a una al Developer, espera los reportes, revisa la calidad, y cuando todo está bien cierra la sesión. Tú no tocas nada.
+You say what you want. Gemini plans. Claude implements. You review the result.
 
 ---
 
-## ¿Cómo funciona?
+## What is it?
+
+AiDepartments is a system that simulates a development team with two AI roles:
+
+- **PM (Project Manager)** — Gemini 2.5 Pro. Analyzes your project, breaks down goals into tasks, and reviews the work.
+- **Developer** — Claude Opus (Antigravity IDE). Writes code, creates files, runs tests.
+
+You give it a goal in natural language. The system handles the rest.
 
 ```
-Tú escribes un objetivo
+"Create a FastAPI app with a /health endpoint and its unit test"
+```
+
+The PM creates a plan (3 tasks), assigns them one by one to the Developer, waits for reports, reviews quality, and closes the session when everything passes. You don't touch anything.
+
+---
+
+## How does it work?
+
+```
+You write a goal
         │
         ▼
 ┌──────────────┐
-│   PM (Gemini) │ ──► Analiza el repo, descompone en fases y tareas
+│   PM (Gemini) │ ──► Analyzes the repo, breaks down into phases and tasks
 └──────┬───────┘
-       │ Plan JSON
+       │ JSON Plan
        ▼
 ┌──────────────┐
-│  Orchestrator │ ──► Itera cada tarea, coordina PM ↔ Developer
+│  Orchestrator │ ──► Iterates each task, coordinates PM ↔ Developer
 └──────┬───────┘
-       │ Prompt de tarea
+       │ Task prompt
        ▼
 ┌──────────────┐
-│ CDP Injector  │ ──► Inyecta la tarea en Antigravity via Chrome DevTools
+│ CDP Injector  │ ──► Injects the task into Antigravity via Chrome DevTools
 └──────┬───────┘
        │
        ▼
 ┌──────────────┐
-│ Dev (Claude)  │ ──► Escribe código, crea archivos, ejecuta tests
+│ Dev (Claude)  │ ──► Writes code, creates files, runs tests
 └──────┬───────┘
-       │ Reporte .md
+       │ Report .md
        ▼
 ┌──────────────┐
-│ File Watcher  │ ──► Detecta que el Developer terminó
+│ File Watcher  │ ──► Detects that the Developer finished
 └──────┬───────┘
        │
        ▼
 ┌──────────────┐
-│   PM (Gemini) │ ──► Lee los archivos creados, revisa calidad
+│   PM (Gemini) │ ──► Reads created files, reviews quality
 └──────┬───────┘
        │
        ▼
-   ✅ Aprobado → siguiente fase
-   ❌ Cambios → re-asigna la tarea
+   ✅ Approved → next phase
+   ❌ Changes requested → re-assigns the task
 ```
 
-Todo esto pasa solo. Si Claude recibe un error de tráfico, el **Auto-Retry Monitor** lo detecta y hace click en "Retry" automáticamente.
+Everything happens automatically. If Claude gets a traffic error, the **Auto-Retry Monitor** detects it and clicks "Retry" automatically.
 
-Mientras tanto puedes ver el progreso en tiempo real en el **Dashboard** (`localhost:8420`).
+Meanwhile you can watch progress in real time on the **Dashboard** (`localhost:8420`).
 
 ---
 
-## Demo real
+## Real demo
 
 ```
-> aid.bat "Implementar una API en FastAPI con /health y test unitario"
+> aid.bat "Implement a FastAPI app with /health and unit test"
 
-[PM] Plan creado: 1 fase, 3 tareas
-  ├── P1-T1: Configurar dependencias (requirements.txt)
-  ├── P1-T2: Implementar endpoint /health
-  └── P1-T3: Crear test unitario
+[PM] Plan created: 1 phase, 3 tasks
+  ├── P1-T1: Configure dependencies (requirements.txt)
+  ├── P1-T2: Implement /health endpoint
+  └── P1-T3: Create unit test
 
-[CDP] Prompt inyectado → Claude trabaja...
-[WATCHER] Reporte P1-T1 recibido (19s)
-[CDP] Siguiente tarea inyectada...
-[WATCHER] Reporte P1-T2 recibido (28s)
-[CDP] Siguiente tarea inyectada...
-[WATCHER] Reporte P1-T3 recibido (73s)
+[CDP] Prompt injected → Claude is working...
+[WATCHER] Report P1-T1 received (19s)
+[CDP] Next task injected...
+[WATCHER] Report P1-T2 received (28s)
+[CDP] Next task injected...
+[WATCHER] Report P1-T3 received (73s)
 
-[PM] ✅ Fase 1 APROBADA
-     "El trabajo cumple todos los criterios. Buen trabajo."
+[PM] ✅ Phase 1 APPROVED
+     "Work meets all acceptance criteria. Good job."
 
-Sesión completada exitosamente
+Session completed successfully
 ```
 
-**Resultado**: 3 archivos creados, test pasa, 0 intervención humana.
+**Result**: 3 files created, test passes, 0 human intervention.
 
 ---
 
-## Setup rápido
+## Quick setup
 
 ```bash
-# 1. Requisitos
+# 1. Dependencies
 npm install -g @anthropic-ai/gemini-cli   # PM
 pip install websocket-client requests       # CDP
 
-# 2. Clonar
+# 2. Clone
 git clone https://github.com/hectorca87/AiDepartments.git
 
-# 3. Colocar dentro de tu proyecto
-mv AiDepartments mi-proyecto/AiDepartments
+# 3. Place inside your project
+mv AiDepartments my-project/AiDepartments
 
-# 4. Copiar instrucciones del PM
-mkdir mi-proyecto/.gemini
-cp AiDepartments/templates/.gemini/GEMINI.md mi-proyecto/.gemini/
+# 4. Copy PM instructions
+mkdir my-project/.gemini
+cp AiDepartments/templates/.gemini/GEMINI.md my-project/.gemini/
 
-# 5. Abrir Antigravity con CDP (PowerShell)
+# 5. Open Antigravity with CDP (PowerShell)
 $exe = @("$env:LOCALAPPDATA\Programs\Antigravity\Antigravity.exe","$env:ProgramFiles\Antigravity\Antigravity.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1; Start-Process $exe -ArgumentList '--remote-debugging-port=9000'
-# Luego abre tu proyecto en Antigravity (File → Open Folder)
+# Then open your project in Antigravity (File → Open Folder)
 
-# 6. Lanzar
-cd mi-proyecto/AiDepartments
-aid.bat "Tu objetivo aquí"
+# 6. Launch
+cd my-project/AiDepartments
+aid.bat "Your goal here"
 ```
 
 ---
 
-## Comandos
+## Commands
 
-| Comando | Qué hace |
-|---------|----------|
-| `aid.bat "objetivo"` | Nueva sesión autónoma |
-| `aid.bat --dashboard` | Dashboard web en `localhost:8420` |
-| `aid.bat --retry` | Monitor auto-retry para errores de tráfico |
-| `aid.bat --resume latest` | Reanudar última sesión |
-| `aid.bat --help` | Ver todas las opciones |
+| Command | What it does |
+|---------|-------------|
+| `aid.bat "goal"` | New autonomous session |
+| `aid.bat --dashboard` | Web dashboard at `localhost:8420` |
+| `aid.bat --retry` | Auto-retry monitor for traffic errors |
+| `aid.bat --resume latest` | Resume last session |
+| `aid.bat --help` | Show all options |
 
 ---
 
 ## Stack
 
-| Componente | Tecnología |
+| Component | Technology |
 |-----------|------------|
 | PM | Gemini 2.5 Pro (via Gemini CLI) |
 | Developer | Claude Opus 4.6 (via Antigravity IDE) |
-| Inyección de prompts | Chrome DevTools Protocol (CDP) |
-| Dashboard | Python HTTP server + SPA vanilla |
-| Orquestación | Python 3.12, sin frameworks externos |
+| Prompt injection | Chrome DevTools Protocol (CDP) |
+| Dashboard | Python HTTP server + vanilla SPA |
+| Orchestration | Python 3.12, no external frameworks |
 
 ---
 
-## Requisitos
+## Requirements
 
 - Windows 10/11
 - Python 3.12+
 - Node.js 18+
 - [Antigravity IDE](https://idx.google.com/antigravity)
-- Cuenta Google con Gemini Advanced
+- Google account with Gemini Advanced
 
 ---
 
-## Configuración (config.py)
+## Configuration (config.py)
 
-| Variable | Default | Descripción |
+| Variable | Default | Description |
 |----------|---------|-------------|
-| `GEMINI_MODEL` | `gemini-2.5-pro` | Modelo del PM |
-| `CDP_PORT` | `9000` | Puerto CDP de Antigravity |
-| `DASHBOARD_PORT` | `8420` | Puerto del dashboard web |
-| `AG_REPORT_TIMEOUT` | `1800` (30 min) | Timeout máximo por tarea |
-| `PM_TIMEOUT` | `300` (5 min) | Timeout del PM por llamada |
+| `GEMINI_MODEL` | `gemini-2.5-pro` | PM model |
+| `CDP_PORT` | `9000` | Antigravity CDP port |
+| `DASHBOARD_PORT` | `8420` | Web dashboard port |
+| `AG_REPORT_TIMEOUT` | `1800` (30 min) | Max timeout per task |
+| `PM_TIMEOUT` | `300` (5 min) | PM call timeout |
 
 ---
 
 ## Troubleshooting
 
-| Problema | Solución |
-|----------|----------|
-| `gemini` no encontrado | `npm install -g @anthropic-ai/gemini-cli` |
-| `gemini` pide login | Ejecuta `gemini` interactivo y autentícate |
-| CDP 403 Forbidden | Reinicia Antigravity con `--remote-debugging-port=9000` |
-| Prompt no llega al chat | Verifica que el panel Agent está visible (no minimizado) |
-| PM devuelve JSON inválido | El json_engine auto-corrige — si persiste, aumenta `JSON_CORRECTION_MAX_RETRIES` |
-| Dashboard no carga | Ejecuta `aid.bat --dashboard` primero |
-
+| Problem | Solution |
+|---------|----------|
+| `gemini` not found | `npm install -g @anthropic-ai/gemini-cli` |
+| `gemini` asks for login | Run `gemini` interactively and authenticate |
+| CDP 403 Forbidden | Restart Antigravity with `--remote-debugging-port=9000` |
+| Prompt doesn't reach chat | Make sure the Agent panel is visible (not minimized) |
+| PM returns invalid JSON | json_engine auto-corrects — if persistent, increase `JSON_CORRECTION_MAX_RETRIES` |
+| Dashboard won't load | Run `aid.bat --dashboard` first |
