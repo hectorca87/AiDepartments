@@ -166,42 +166,58 @@ def check_and_retry(ws) -> dict | None:
         const triggers = %s;
         const buttonPatterns = %s;
 
-        // Search all text content for trigger phrases
-        const bodyText = (document.body && document.body.textContent || '').toLowerCase();
+        // Only scan the LAST few chat messages, not the entire page.
+        // This prevents false positives from old conversation text.
+        const chatMessages = document.querySelectorAll(
+            '.chat-message, .message-content, .response-container, ' +
+            '.chat-item, [class*="message"], [class*="response"]'
+        );
 
-        const foundTrigger = triggers.find(t => bodyText.includes(t));
+        let searchText = '';
+        if (chatMessages.length > 0) {
+            // Only check the last 3 messages
+            const recent = Array.from(chatMessages).slice(-3);
+            searchText = recent.map(m => m.textContent || '').join(' ').toLowerCase();
+        } else {
+            // Fallback: check last 2000 chars of body text (tail, not head)
+            const fullText = (document.body && document.body.textContent || '');
+            searchText = fullText.slice(-2000).toLowerCase();
+        }
+
+        const foundTrigger = triggers.find(t => searchText.includes(t));
         if (!foundTrigger) return JSON.stringify({found: false});
 
-        // Look for retry/continue buttons in normal DOM
+        // Look for retry buttons — STRICT selectors only
+        // Exclude elements with too much text (> 50 chars = not a button)
         const allButtons = document.querySelectorAll(
-            'button, [role="button"], a.action-label, .monaco-button, ' +
-            '.codicon-debug-continue, [class*="action"], [class*="button"]'
+            'button, [role="button"], a.action-label, .monaco-button'
         );
 
         for (const btn of allButtons) {
             const btnText = (btn.textContent || btn.title || btn.ariaLabel || '').toLowerCase().trim();
+            if (btnText.length > 50) continue;  // Skip non-button elements
             if (buttonPatterns.some(p => btnText.includes(p))) {
                 btn.click();
                 return JSON.stringify({found: true, trigger: foundTrigger, clicked: btnText, shadow: false});
             }
         }
 
-        // Recursive Shadow DOM search
+        // Recursive Shadow DOM search (strict selectors)
         function searchShadowRoots(root) {
             const elements = root.querySelectorAll('*');
             for (const el of elements) {
                 if (el.shadowRoot) {
                     const shadowButtons = el.shadowRoot.querySelectorAll(
-                        'button, [role="button"], .monaco-button, [class*="button"]'
+                        'button, [role="button"], .monaco-button'
                     );
                     for (const btn of shadowButtons) {
                         const btnText = (btn.textContent || btn.title || btn.ariaLabel || '').toLowerCase().trim();
+                        if (btnText.length > 50) continue;
                         if (buttonPatterns.some(p => btnText.includes(p))) {
                             btn.click();
                             return {found: true, trigger: foundTrigger, clicked: btnText, shadow: true};
                         }
                     }
-                    // Recurse into nested shadow roots
                     const nested = searchShadowRoots(el.shadowRoot);
                     if (nested) return nested;
                 }
