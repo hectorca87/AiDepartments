@@ -46,6 +46,30 @@ def _log(prefix: str, msg: str) -> None:
     print(f"  [{ts}] [{prefix}] {msg}")
 
 
+def _detect_project_path(objective: str) -> Path | None:
+    """
+    Detect a project directory path mentioned in the objective text.
+    Looks for Windows-style absolute paths (e.g., C:\\Projects\\Boxy).
+    Returns the path if it exists on disk, None otherwise.
+    """
+    # Match Windows paths like C:\...\Folder or "C:\...\Folder"
+    patterns = [
+        r'[A-Z]:\\(?:[^\s\\:*?"<>|]+\\)*[^\s\\:*?"<>|]+',  # unquoted
+    ]
+    for pattern in patterns:
+        matches = re.findall(pattern, objective)
+        for match in matches:
+            candidate = Path(match)
+            if candidate.exists() and candidate.is_dir():
+                _log("ORCH", f"Path detectado en objetivo: {candidate}")
+                return candidate
+            # Maybe the path doesn't exist yet — still use it as cwd parent
+            if candidate.parent.exists():
+                _log("ORCH", f"Path padre detectado: {candidate}")
+                return candidate
+    return None
+
+
 # ─────────────────────────────────────────────
 # JSON helpers (delegate to json_engine)
 # ─────────────────────────────────────────────
@@ -330,8 +354,13 @@ def run_session(
         # ── PHASE 0: Gemini decomposes the objective ──
         print("[PM] Gemini esta analizando el proyecto y descomponiendo el objetivo...")
 
+        # Detect project path from objective (e.g., "C:\AndroidProjects\Boxy")
+        project_cwd = _detect_project_path(objective)
+        if project_cwd:
+            _log("ORCH", f"Proyecto detectado en: {project_cwd}")
+
         try:
-            pm_response = decompose_objective(objective)
+            pm_response = decompose_objective(objective, project_cwd=project_cwd)
         except Exception as e:
             print(f"[ERROR] Error llamando a Gemini PM: {e}")
             logger.update_state(status="ERROR", error=str(e))

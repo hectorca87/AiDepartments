@@ -96,7 +96,7 @@ def _check_session_history_available() -> bool:
     return True
 
 
-def call_gemini(prompt: str, resume: bool = True) -> str:
+def call_gemini(prompt: str, resume: bool = True, cwd: Path | None = None) -> str:
     """
     Call Gemini CLI in headless mode with a prompt.
 
@@ -141,6 +141,7 @@ def call_gemini(prompt: str, resume: bool = True) -> str:
         for model in MODEL_CHAIN:
             result = _try_model_with_retries(
                 model=model,
+                cwd=cwd,
                 prompt_file=prompt_file,
                 env=env,
                 should_resume=should_resume,
@@ -173,6 +174,7 @@ def _try_model_with_retries(
     prompt_file: Path,
     env: dict[str, str],
     should_resume: bool,
+    cwd: Path | None = None,
 ) -> str | None:
     """
     Try a specific model with exponential backoff retries on quota errors.
@@ -199,7 +201,7 @@ def _try_model_with_retries(
 
             result = subprocess.run(
                 pipe_cmd,
-                cwd=str(WORKSPACE_ROOT),
+                cwd=str(cwd or WORKSPACE_ROOT),
                 env=env,
                 capture_output=True,
                 text=True,
@@ -286,13 +288,14 @@ def get_session_status() -> str:
     return "active" if _session_index is not None else "none"
 
 
-def decompose_objective(objective: str) -> str:
+def decompose_objective(objective: str, project_cwd: Path | None = None) -> str:
     """
     Ask Gemini PM to analyze the workspace, investigate, and decompose
     an objective into phases and tasks. Starts a NEW session.
 
     Args:
         objective: The project objective to decompose
+        project_cwd: If set, Gemini CLI runs with this as working directory
 
     Returns:
         Raw text response from Gemini containing JSON plan
@@ -313,7 +316,7 @@ Recuerda:
 - Las fases deben ir de lo más fundamental a lo más complejo.
 - Manda SOLO la primera fase de tareas. Las demás fases solo descríbelas brevemente.
 """
-    return call_gemini(prompt)
+    return call_gemini(prompt, cwd=project_cwd)
 
 
 def review_work(phase_id: str, work_report: str) -> str:
