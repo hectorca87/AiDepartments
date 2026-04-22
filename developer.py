@@ -16,9 +16,7 @@ from pathlib import Path
 
 from config import (
     WORKSPACE_ROOT,
-    ANTIGRAVITY_CMD,
     DEV_TASK_TIMEOUT,
-    AG_LAUNCH_WAIT,
 )
 
 
@@ -280,22 +278,23 @@ def _call_antigravity(task: dict, session_dir: Path) -> str:
     _log("DEV:AG", f"Prompt: {prompt_file} ({prompt_file.stat().st_size} bytes)")
     _log("DEV:AG", f"Reporte esperado: {report_path}")
 
-    # Step 1: Ensure workspace is open via CLI
-    # (The CLI correctly opens/reuses the workspace window even though it fails to deliver prompts)
+    # Step 1: Verify CDP is reachable (Antigravity must be open already)
+    # The user should open Antigravity in the correct project BEFORE running aid.bat
     try:
-        open_cmd = f'{ANTIGRAVITY_CMD} --reuse-window "{WORKSPACE_ROOT}"'
-        subprocess.run(
-            open_cmd, cwd=str(WORKSPACE_ROOT), shell=True,
-            capture_output=True, text=True, timeout=AG_LAUNCH_WAIT,
-            encoding="utf-8",
-        )
-        _log("DEV:AG", "Workspace abierto/verificado via CLI")
-    except (subprocess.TimeoutExpired, FileNotFoundError, Exception) as e:
-        _log("DEV:AG:WARN", f"CLI workspace open: {e} (continuing with CDP)")
+        import requests as _requests
+        from config import CDP_PORT
+        resp = _requests.get(f"http://localhost:{CDP_PORT}/json", timeout=3)
+        if resp.status_code == 200:
+            _log("DEV:AG", "Antigravity detectado via CDP")
+        else:
+            _log("DEV:AG:WARN", f"CDP respondió con status {resp.status_code}")
+    except Exception:
+        _log("DEV:AG:ERROR", f"Antigravity no detectado en CDP puerto. Abre Antigravity con --remote-debugging-port antes de ejecutar aid.bat")
+        return "[ERROR] Antigravity no está abierto con CDP habilitado. Ábrelo primero."
 
-    # Brief pause to let the window initialize
+    # Brief pause before injection
     import time as _time
-    _time.sleep(2)
+    _time.sleep(1)
 
     # Step 2: Inject prompt via CDP
     try:
