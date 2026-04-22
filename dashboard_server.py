@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import http.server
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -461,6 +462,142 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             font-size: 0.78rem;
         }
 
+        /* ── New Session Button ── */
+        .new-session-btn {
+            margin: 0.5rem;
+            padding: 0.6rem 1rem;
+            background: linear-gradient(135deg, var(--gemini-blue) 0%, var(--dev-purple) 100%);
+            color: #fff;
+            border: none;
+            border-radius: var(--radius-sm);
+            font-family: 'Inter', sans-serif;
+            font-size: 0.78rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all var(--transition);
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        .new-session-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 16px rgba(74, 138, 244, 0.3);
+        }
+
+        /* ── Modal ── */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(4px);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-overlay.open { display: flex; }
+
+        .modal {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            width: 520px;
+            max-width: 90vw;
+            padding: 1.5rem;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            animation: modalIn 0.2s ease;
+        }
+
+        @keyframes modalIn {
+            from { opacity: 0; transform: scale(0.95) translateY(10px); }
+            to { opacity: 1; transform: scale(1) translateY(0); }
+        }
+
+        .modal h2 {
+            font-size: 1.05rem;
+            font-weight: 700;
+            margin-bottom: 1rem;
+            background: var(--gradient-header);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .modal textarea {
+            width: 100%;
+            min-height: 120px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            color: var(--text-primary);
+            font-family: 'Inter', sans-serif;
+            font-size: 0.85rem;
+            padding: 0.75rem;
+            resize: vertical;
+            outline: none;
+            transition: border-color var(--transition);
+        }
+
+        .modal textarea:focus {
+            border-color: var(--gemini-blue);
+        }
+
+        .modal textarea::placeholder {
+            color: var(--text-dim);
+        }
+
+        .modal-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.5rem;
+            margin-top: 1rem;
+        }
+
+        .modal-btn {
+            padding: 0.5rem 1.2rem;
+            border-radius: var(--radius-sm);
+            font-family: 'Inter', sans-serif;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+            border: 1px solid var(--border);
+            transition: all var(--transition);
+        }
+
+        .modal-btn.cancel {
+            background: transparent;
+            color: var(--text-secondary);
+        }
+
+        .modal-btn.cancel:hover {
+            background: var(--bg-card);
+        }
+
+        .modal-btn.launch {
+            background: linear-gradient(135deg, var(--gemini-blue) 0%, var(--dev-purple) 100%);
+            color: #fff;
+            border: none;
+        }
+
+        .modal-btn.launch:hover {
+            box-shadow: 0 4px 16px rgba(74, 138, 244, 0.3);
+        }
+
+        .modal-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .modal-status {
+            font-size: 0.75rem;
+            margin-top: 0.5rem;
+            color: var(--success);
+            min-height: 1.2rem;
+        }
+
+        .modal-status.error { color: var(--error); }
+
         /* ── Session summary header ── */
         .session-header {
             padding: 0.75rem 1.5rem;
@@ -500,6 +637,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
     <div class="layout">
         <div class="sidebar">
+            <button class="new-session-btn" onclick="openNewSession()">＋ New Session</button>
             <div class="sidebar-header">Sesiones</div>
             <div class="session-list" id="sessionList"></div>
         </div>
@@ -507,8 +645,23 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <div class="main-panel" id="mainPanel">
             <div class="empty-state">
                 <div class="icon">🎼</div>
-                <p>Lanza una sesión para comenzar:</p>
-                <code>orchestra.bat "tu objetivo"</code>
+                <p>Click <strong>＋ New Session</strong> or run:</p>
+                <code>aid.bat "your goal"</code>
+            </div>
+        </div>
+    </div>
+
+    <!-- New Session Modal -->
+    <div class="modal-overlay" id="newSessionModal">
+        <div class="modal">
+            <h2>🚀 New Session</h2>
+            <textarea id="objectiveInput" placeholder="Describe what you want to build...
+Example: Create a REST API with FastAPI, authentication, and unit tests.
+Tip: Include the project path if it's not in the current workspace."></textarea>
+            <div class="modal-status" id="launchStatus"></div>
+            <div class="modal-actions">
+                <button class="modal-btn cancel" onclick="closeNewSession()">Cancel</button>
+                <button class="modal-btn launch" id="launchBtn" onclick="launchSession()">🚀 Launch</button>
             </div>
         </div>
     </div>
@@ -703,6 +856,73 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             refresh();
         }
 
+        // ── New Session Modal ──
+        function openNewSession() {
+            document.getElementById('newSessionModal').classList.add('open');
+            document.getElementById('objectiveInput').focus();
+            document.getElementById('launchStatus').textContent = '';
+        }
+
+        function closeNewSession() {
+            document.getElementById('newSessionModal').classList.remove('open');
+            document.getElementById('objectiveInput').value = '';
+            document.getElementById('launchStatus').textContent = '';
+        }
+
+        async function launchSession() {
+            const input = document.getElementById('objectiveInput');
+            const btn = document.getElementById('launchBtn');
+            const status = document.getElementById('launchStatus');
+            const objective = input.value.trim();
+
+            if (!objective) {
+                status.textContent = 'Write an objective first.';
+                status.className = 'modal-status error';
+                return;
+            }
+
+            btn.disabled = true;
+            btn.textContent = 'Launching...';
+            status.textContent = '';
+
+            try {
+                const r = await fetch('/api/launch', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({objective}),
+                });
+                const data = await r.json();
+
+                if (data.ok) {
+                    status.textContent = '✅ Session launched! Refreshing...';
+                    status.className = 'modal-status';
+                    setTimeout(() => {
+                        closeNewSession();
+                        refresh();
+                    }, 1500);
+                } else {
+                    status.textContent = '❌ ' + (data.error || 'Launch failed');
+                    status.className = 'modal-status error';
+                }
+            } catch (e) {
+                status.textContent = '❌ Connection error';
+                status.className = 'modal-status error';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '🚀 Launch';
+            }
+        }
+
+        // Close modal on Escape
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape') closeNewSession();
+        });
+
+        // Launch on Ctrl+Enter in textarea
+        document.getElementById('objectiveInput').addEventListener('keydown', e => {
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) launchSession();
+        });
+
         // ── Refresh loop ──
         async function refresh() {
             const sessions = await fetchSessions();
@@ -744,13 +964,44 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             self._serve_sessions()
         elif self.path.startswith("/api/session/"):
             session_id = self.path.split("/api/session/", 1)[1]
-            # Sanitize: only allow alphanumeric, underscore, hyphen
             if all(c.isalnum() or c in ('_', '-') for c in session_id):
                 self._serve_session(session_id)
             else:
                 self._send_json({"error": "Invalid session ID"}, 400)
         else:
             self.send_error(404)
+
+    def do_POST(self):
+        if self.path == "/api/launch":
+            self._handle_launch()
+        else:
+            self.send_error(404)
+
+    def _handle_launch(self):
+        """POST /api/launch — Launch a new orchestrator session in background."""
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length).decode('utf-8'))
+            objective = body.get('objective', '').strip()
+
+            if not objective:
+                self._send_json({'ok': False, 'error': 'No objective provided'}, 400)
+                return
+
+            # Launch orchestrator.py as a detached subprocess
+            orchestrator_path = Path(__file__).parent / 'orchestrator.py'
+            subprocess.Popen(
+                [sys.executable, str(orchestrator_path), objective],
+                cwd=str(Path(__file__).parent),
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+            self._send_json({'ok': True, 'message': f'Session launched for: {objective[:100]}'})
+
+        except Exception as e:
+            self._send_json({'ok': False, 'error': str(e)}, 500)
 
     def _serve_html(self):
         """Serve the SPA HTML page."""
