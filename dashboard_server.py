@@ -232,6 +232,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         .status-pill.paused { background: var(--warning-bg); color: var(--warning); }
         .status-pill.error { background: var(--error-bg); color: var(--error); }
         .status-pill.started { background: var(--gemini-glow); color: var(--info); }
+        .status-pill.stopped { background: var(--error-bg); color: var(--error); }
 
         .meta-sep { color: var(--border); }
 
@@ -621,6 +622,42 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
             font-size: 0.72rem;
             color: var(--text-dim);
         }
+
+        .stop-btn {
+            padding: 0.35rem 0.85rem;
+            background: transparent;
+            border: 1px solid var(--error);
+            color: var(--error);
+            border-radius: var(--radius-sm);
+            font-family: 'Inter', sans-serif;
+            font-size: 0.72rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all var(--transition);
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .stop-btn:hover {
+            background: var(--error);
+            color: #fff;
+            box-shadow: 0 0 16px rgba(240, 80, 80, 0.3);
+        }
+
+        .stop-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            background: transparent;
+            color: var(--error);
+        }
+
+        .stop-btn.stopping {
+            opacity: 0.6;
+            cursor: wait;
+        }
     </style>
 </head>
 <body>
@@ -696,6 +733,7 @@ Tip: Include the project path if it's not in the current workspace."></textarea>
             if (sl === 'completed') return 'completed';
             if (sl.includes('progress') || sl === 'started') return 'in_progress';
             if (sl.includes('error') || sl.includes('review_error')) return 'error';
+            if (sl === 'stopped') return 'stopped';
             return 'paused';
         }
 
@@ -770,6 +808,7 @@ Tip: Include the project path if it's not in the current workspace."></textarea>
                 <span class="status-pill ${statusClass(st.status)}">${st.status || '?'}</span>
                 <div class="title">${esc(st.objective || 'Sin objetivo')}</div>
                 <div class="detail">${st.session_id || ''}</div>
+                ${_isSessionActive(st.status) ? `<button class="stop-btn" id="stopBtn" onclick="stopSession('${esc(st.session_id)}')">⛔ Stop</button>` : ''}
             </div>`;
 
             // Phase bar
@@ -854,6 +893,49 @@ Tip: Include the project path if it's not in the current workspace."></textarea>
             currentSession = id;
             lastContentHash = '';
             refresh();
+        }
+
+        // ── Helpers ──
+        function _isSessionActive(status) {
+            if (!status) return false;
+            const s = status.toUpperCase();
+            return s === 'IN_PROGRESS' || s === 'STARTED';
+        }
+
+        // ── Stop Session ──
+        async function stopSession(sessionId) {
+            const btn = document.getElementById('stopBtn');
+            if (btn) {
+                btn.disabled = true;
+                btn.classList.add('stopping');
+                btn.innerHTML = '⏳ Stopping...';
+            }
+
+            try {
+                const r = await fetch('/api/stop/' + sessionId, {
+                    method: 'POST',
+                });
+                const data = await r.json();
+
+                if (data.ok) {
+                    if (btn) btn.innerHTML = '✔ Stopped';
+                    setTimeout(() => refresh(), 1000);
+                } else {
+                    if (btn) {
+                        btn.innerHTML = '⛔ Stop';
+                        btn.disabled = false;
+                        btn.classList.remove('stopping');
+                    }
+                    console.error('Stop failed:', data.error);
+                }
+            } catch (e) {
+                if (btn) {
+                    btn.innerHTML = '⛔ Stop';
+                    btn.disabled = false;
+                    btn.classList.remove('stopping');
+                }
+                console.error('Stop error:', e);
+            }
         }
 
         // ── New Session Modal ──
@@ -974,6 +1056,12 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path == "/api/launch":
             self._handle_launch()
+        elif self.path.startswith("/api/stop/"):
+            session_id = self.path.split("/api/stop/", 1)[1]
+            if all(c.isalnum() or c in ('_', '-') for c in session_id):
+                self._handle_stop(session_id)
+            else:
+                self._send_json({"error": "Invalid session ID"}, 400)
         else:
             self.send_error(404)
 
@@ -1002,6 +1090,75 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
 
         except Exception as e:
             self._send_json({'ok': False, 'error': str(e)}, 500)
+
+    def _handle_stop(self, session_id: str):
+        """POST /api/stop/{id} — Stop a running orchestrator session.
+
+        Two-pronged approach for reliable stopping:
+        1. Create a .stop sentinel file (graceful — orchestrator checks between tasks)
+        2. Kill the process tree by PID (immediate — stops subprocess and children)
+        """
+        import signal
+
+        session_dir = SESSIONS_DIR / session_id
+        if not session_dir.exists():
+            self._send_json({'ok': False, 'error': 'Session not found'}, 404)
+            return
+
+        state_file = session_dir / "state.json"
+        if not state_file.exists():
+            self._send_json({'ok': False, 'error': 'No state file'}, 404)
+            return
+
+        try:
+            with open(state_file, "r", encoding="utf-8") as f:
+                state = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            self._send_json({'ok': False, 'error': 'Corrupt state file'}, 500)
+            return
+
+        status = state.get("status", "")
+        if status not in ("IN_PROGRESS", "STARTED"):
+            self._send_json({'ok': False, 'error': f'Session is not running (status: {status})'}, 400)
+            return
+
+        # 1. Create .stop sentinel file for graceful shutdown
+        stop_file = session_dir / ".stop"
+        stop_file.write_text("stop", encoding="utf-8")
+
+        # 2. Kill the orchestrator process by PID (and its children)
+        pid = state.get("pid")
+        process_killed = False
+        if pid:
+            try:
+                import os as _os
+                # On Windows, taskkill /T kills the process tree
+                subprocess.run(
+                    ['taskkill', '/F', '/T', '/PID', str(pid)],
+                    capture_output=True,
+                    timeout=10,
+                )
+                process_killed = True
+            except Exception:
+                # Process may have already exited — that's fine
+                pass
+
+        # 3. Update state to STOPPED
+        try:
+            state["status"] = "STOPPED"
+            from datetime import datetime as _dt
+            state["last_update"] = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
+            with open(state_file, "w", encoding="utf-8") as f:
+                json.dump(state, f, indent=2, ensure_ascii=False)
+        except OSError:
+            pass
+
+        self._send_json({
+            'ok': True,
+            'message': f'Session {session_id} stopped',
+            'process_killed': process_killed,
+            'pid': pid,
+        })
 
     def _serve_html(self):
         """Serve the SPA HTML page."""
@@ -1034,6 +1191,7 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                             "total_phases": state.get("total_phases", 0),
                             "started_at": state.get("started_at", ""),
                             "last_update": state.get("last_update", ""),
+                            "pid": state.get("pid"),
                         })
                     except (json.JSONDecodeError, OSError):
                         # Skip corrupt state files

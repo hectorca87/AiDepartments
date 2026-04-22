@@ -12,6 +12,7 @@ Features:
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import uuid
@@ -68,6 +69,23 @@ def _detect_project_path(objective: str) -> Path | None:
                 _log("ORCH", f"Path padre detectado: {candidate}")
                 return candidate
     return None
+
+
+# ─────────────────────────────────────────────
+# Stop signal
+# ─────────────────────────────────────────────
+
+def _check_stop_signal(session_dir: Path) -> bool:
+    """Check if a .stop sentinel file exists, signaling graceful shutdown."""
+    stop_file = session_dir / ".stop"
+    if stop_file.exists():
+        _log("ORCH", "Señal de parada detectada (.stop). Deteniendo sesión...")
+        try:
+            stop_file.unlink()  # Clean up sentinel
+        except OSError:
+            pass
+        return True
+    return False
 
 
 # ─────────────────────────────────────────────
@@ -385,6 +403,7 @@ def run_session(
         # Persist plan and tasks for recovery
         logger.update_state(
             status="IN_PROGRESS",
+            pid=os.getpid(),
             dev_mode=dev_mode,
             total_phases=total_phases,
             current_phase=current_phase,
@@ -410,6 +429,12 @@ def run_session(
             task = tasks[task_idx]
             task_id = task.get("id", f"T{task_idx + 1}")
 
+            # Check stop signal before each task
+            if _check_stop_signal(logger.session_dir):
+                logger.update_state(status="STOPPED")
+                print(f"\n[ORCH] ⛔ Sesión detenida por el usuario antes de tarea {task_id}")
+                break
+
             # Skip already completed tasks (recovery scenario)
             if task_id in tasks_completed:
                 _log("ORCH", f"Tarea {task_id} ya completada, saltando")
@@ -433,6 +458,16 @@ def run_session(
             logger.update_state(tasks_completed=tasks_completed)
 
             print(f"  [OK] Tarea {task_id} completada")
+
+            # Check stop signal after task completion too
+            if _check_stop_signal(logger.session_dir):
+                logger.update_state(status="STOPPED")
+                print(f"\n[ORCH] ⛔ Sesión detenida por el usuario tras tarea {task_id}")
+                break
+
+        # If stopped, break outer loop too
+        if logger._get_state().get("status") == "STOPPED":
+            break
 
         # Reset start index for next phase
         start_task_index = 0
@@ -621,7 +656,7 @@ def run_session(
         final_state = logger._get_state()
         if final_state.get("status") not in ("PAUSED", "PAUSED_MAX_RETRIES", "ERROR",
                                                "REVIEW_ERROR", "REVIEW_UNSTRUCTURED",
-                                               "PARSE_ERROR_NEXT_PHASE"):
+                                               "PARSE_ERROR_NEXT_PHASE", "STOPPED"):
             logger.update_state(status="PAUSED")
         print(f"\n{'='*60}")
         print(f"  🎼 Orchestra  --  Sesión pausada")
